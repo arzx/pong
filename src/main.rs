@@ -5,6 +5,18 @@ use bevy::math::bounding::{
     IntersectsVolume
 };
 
+
+#[derive(Resource)]
+struct Score{
+  player: u32,
+  ai: u32,
+}
+#[derive(EntityEvent)]
+struct Scored {
+  #[event_target]
+  scorer: Entity,
+}
+
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum Collision {
     Left,
@@ -127,7 +139,6 @@ fn spawn_paddles(
     }
 
 //todo: fn score
-//todo: gutter
 fn spawn_gutters(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -270,10 +281,56 @@ fn constrain_paddle_position(
     }
   }
 
+
+  fn detect_goal(
+    ball: Single<(&Position, &Collider), With<Ball>>,
+    player: Single<Entity, (With<Player>, Without<Ai>)>,
+    ai: Single<Entity, (With<Ai>, Without<Player>)>,
+    window: Single<&Window>,
+    mut commands: Commands,
+  ) {
+    let (ball_position, ball_collider) = ball.into_inner();
+    let half_window_size = window.resolution.size() / 2.0;
+
+    if ball_position.0.x - ball_collider.half_size().x > half_window_size.x {
+      commands.trigger(Scored {scorer: *player});
+    }
+    if ball_position.0.x + ball_collider.half_size().x < -half_window_size.x {
+      commands.trigger(Scored {scorer: *ai});
+    }
+  }
+
+  fn reset_ball(
+    _event: On<Scored>,
+    ball: Single<(&mut Position, &mut Velocity), With<Ball>>,
+  ) {
+    let (mut ball_position, mut ball_velocity) = ball.into_inner();
+    ball_position.0 = Vec2::ZERO;
+    ball_velocity.0 = Vec2::new(BALL_SPEED, 0.0);
+  }
+
+  fn update_score(
+    event: On<Scored>,
+    mut score: ResMut<Score>,
+    is_ai: Query<&Ai>,
+    is_player: Query<&Player>,
+  ) {
+    if is_ai.get(event.scorer).is_ok(){
+      score.ai += 1;
+      info!("AI scored! {} - {}", score.player, score.ai);
+    }
+
+    if is_player.get(event.scorer).is_ok() {
+      score.player += 1;
+      info!("Player scored! {} - {}", score.player, score.ai);
+    }
+  }
+
   fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
+        .insert_resource(Score{player:0, ai:0})
         .add_systems(Startup, (
             camera_setup, 
             spawn_ball,
@@ -288,8 +345,11 @@ fn constrain_paddle_position(
                 move_ball,                
                 project_positions,        
                 handle_collisions,        
-                constrain_paddle_position
-            )
+                constrain_paddle_position,
+                detect_goal.after(move_ball)
+            ),
         )
+        .add_observer(reset_ball)
+        .add_observer(update_score)
         .run();
 }
