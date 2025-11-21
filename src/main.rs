@@ -17,6 +17,12 @@ struct Scored {
   scorer: Entity,
 }
 
+#[derive(Component)]
+struct PlayerScore;
+
+#[derive(Component)]
+struct AiScore;
+
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum Collision {
     Left,
@@ -326,30 +332,102 @@ fn constrain_paddle_position(
     }
   }
 
+  fn spawn_scoreboard(mut commands: Commands) {
+    let container = Node {
+      width: percent(100.0),
+      height: percent(100.0),
+      justify_content: JustifyContent::Center,
+      ..default()
+    };
+
+    let header = Node {
+      width: px(200.0),
+      height: px(100.0),
+      ..default()
+    };
+    let player_score = (
+      PlayerScore,
+      Text::new("0"),
+      TextFont::from_font_size(72.0),
+      TextColor(Color::WHITE),
+      TextLayout::new_with_justify(Justify::Center),
+      Node {
+        position_type: PositionType::Absolute,
+        top: px(5.0),
+        left: px(25.0),
+        ..default()
+      },
+    );
+
+    let ai_score = (
+      AiScore,
+      Text::new("0"),
+      TextFont::from_font_size(72.0),
+      TextColor(Color::WHITE),
+      TextLayout::new_with_justify(Justify::Center),
+      Node {
+        position_type: PositionType::Absolute,
+        top: px(5.0),
+        right: px(25.0),
+        ..default()
+      },
+    );
+
+    commands.spawn((
+      container,
+      children![(header, children![player_score, ai_score])],
+    ));
+  }
+
+  fn update_scoreboard(
+    mut player_score: Single<&mut Text, (With<PlayerScore>, Without<AiScore>)>,
+    mut ai_score: Single<&mut Text, (With<AiScore>, Without<PlayerScore>)>,
+    score: Res<Score>,
+  ) {
+    if score.is_changed() {
+      player_score.0 = score.player.to_string();
+      ai_score.0 = score.ai.to_string();
+    }
+  }
+
+  fn move_ai(
+    ai: Single<(&mut Velocity, &Position), With<Ai>>,
+    ball: Single<&Position, With<Ball>>,
+  ) {
+    let (mut velocity, position) = ai.into_inner();
+    let a_to_b = ball.0 - position.0;
+    velocity.0.y = a_to_b.y.signum() * PADDLE_SPEED;
+  }
+
   fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
-        .insert_resource(Score{player:0, ai:0})
-        .add_systems(Startup, (
-            camera_setup, 
-            spawn_ball,
-            spawn_paddles,
-            spawn_gutters,
-        ))
-        .add_systems(
-            FixedUpdate,
-            (
-                handle_player_input,     
-                move_paddles,             
-                move_ball,                
-                project_positions,        
-                handle_collisions,        
-                constrain_paddle_position,
-                detect_goal.after(move_ball)
-            ),
-        )
-        .add_observer(reset_ball)
-        .add_observer(update_score)
-        .run();
-}
+      .add_plugins(DefaultPlugins)
+      .insert_resource(Score { player: 0, ai: 0 })
+      .add_systems(
+        Startup,
+        (
+          spawn_ball,
+          spawn_paddles,
+          camera_setup,
+          spawn_gutters,
+          spawn_scoreboard,
+        ),
+      )
+      .add_systems(
+        FixedUpdate,
+        (
+          project_positions,
+          move_ball.before(project_positions),
+          handle_collisions.after(move_ball),
+          move_paddles.before(project_positions),
+          handle_player_input.before(move_paddles),
+          constrain_paddle_position.after(move_paddles),
+          detect_goal.after(move_ball),
+          update_scoreboard,
+          move_ai,
+        ),
+      )
+      .add_observer(reset_ball)
+      .add_observer(update_score)
+      .run();
+  }
