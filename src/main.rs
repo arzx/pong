@@ -45,14 +45,14 @@ struct Velocity(Vec2);
 #[derive(Component)]
 #[require(
     Position, 
-    Velocity=Velocity(Vec2::new(BALL_SPEED, 0.0)),
+    Velocity=Velocity(Vec2::X),
     Collider = Collider(Rectangle::new(BALL_SIZE, BALL_SIZE)),
 )]
 struct Ball;
 const BALL_SIZE: f32 = 10.0;
 const BALL_SHAPE: Circle = Circle::new(BALL_SIZE);
 const BALL_COLOR: Color = Color::srgb(1.0, 1.0, 1.0);
-const BALL_SPEED: f32 = 2.0;
+const BALL_SPEED: f32 = 5.0;
 
 
 #[derive(Component)]
@@ -90,6 +90,7 @@ fn spawn_ball(
     commands.spawn((
         Ball,
         Position(Vec2::ZERO),           // starting logical position
+        Velocity(Vec2::new(1.0, 0.35).normalize()),
         Transform::default(),           // actual transform in the world
         Mesh2d(mesh),
         MeshMaterial2d(material),
@@ -206,32 +207,40 @@ impl Collider{
 
 fn handle_collisions(
     ball: Single<(&mut Velocity, &Position, &Collider), With<Ball>>,
-    other_things: Query<(&Position, &Collider), Without<Ball>>,
-  ) {
+    other_things: Query<(&Position, &Collider, Option<&Paddle>), Without<Ball>>,
+) {
     let (mut ball_velocity, ball_position, ball_collider) = ball.into_inner();
-  
-    for (other_position, other_collider) in &other_things {
-      if let Some(collision) = collide_with_side(
-        Aabb2d::new(ball_position.0, ball_collider.half_size()),
-        Aabb2d::new(other_position.0, other_collider.half_size()),
-      ) {
-        match collision {
-          Collision::Left => {
-            ball_velocity.0.x *= -1.;
-          }
-          Collision::Right => {
-            ball_velocity.0.x *= -1.;
-          }
-          Collision::Top => {
-            ball_velocity.0.y *= -1.;
-          }
-          Collision::Bottom => {
-            ball_velocity.0.y *= -1.;
-          }
+
+    for (other_position, other_collider, paddle) in &other_things {
+        if let Some(collision) = collide_with_side(
+            Aabb2d::new(ball_position.0, ball_collider.half_size()),
+            Aabb2d::new(other_position.0, other_collider.half_size()),
+        ) {
+            match collision {
+                Collision::Left | Collision::Right => {
+                    ball_velocity.0.x *= -1.0;
+
+                    if paddle.is_some() {
+                        let relative_offset = (ball_position.0.y - other_position.0.y)
+                            / other_collider.half_size().y;
+                        let clamped = relative_offset.clamp(-0.9, 0.9);
+                        ball_velocity.0.y = clamped;
+                        if ball_velocity.0.length_squared() == 0.0 {
+                            ball_velocity.0 = Vec2::new(ball_velocity.0.x.signum(), 0.35);
+                        }
+                        ball_velocity.0 = ball_velocity.0.normalize_or_zero();
+                        if ball_velocity.0 == Vec2::ZERO {
+                            ball_velocity.0 = Vec2::X;
+                        }
+                    }
+                }
+                Collision::Top | Collision::Bottom => {
+                    ball_velocity.0.y *= -1.0;
+                }
+            }
         }
-      }
     }
-  }
+}
 
 
 const PADDLE_SPEED: f32 = 5.;
@@ -312,7 +321,8 @@ fn constrain_paddle_position(
   ) {
     let (mut ball_position, mut ball_velocity) = ball.into_inner();
     ball_position.0 = Vec2::ZERO;
-    ball_velocity.0 = Vec2::new(BALL_SPEED, 0.0);
+    let horizontal = if ball_velocity.0.x >= 0.0 { -1.0 } else { 1.0 };
+    ball_velocity.0 = Vec2::new(horizontal, 0.55).normalize();
   }
 
   fn update_score(
